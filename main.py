@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 import os
 import time
 import openai
+import requests
+import base64
 
 app = Flask(__name__)
 
@@ -41,7 +43,6 @@ def generate_real_story(theme, session_id):
         
         ai_story = response.choices[0].message.content
         
-        # Parse the AI response into our format
         story = {
             'title': f'The Haunting of {theme.title()}',
             'text': ai_story,
@@ -57,16 +58,49 @@ def generate_real_story(theme, session_id):
         return story
         
     except Exception as e:
-        print(f"OpenAI Error: {e}")
-        # Fallback to mock story if OpenAI fails
+        print(f"OpenAI Story Error: {e}")
         return {
             'title': f'The Curse of the {theme.title()}',
-            'text': f'Deep in the shadows of the {theme}, ancient evil stirs. The walls whisper secrets of the damned, and every footstep echoes with the screams of the forgotten. Tonight, the darkness comes alive...',
+            'text': f'Deep in the shadows of the {theme}, ancient evil stirs...',
             'scenes': [
                 {'number': 1, 'description': f'Approaching the {theme}', 'seconds': 8},
                 {'number': 2, 'description': 'Strange sounds begin', 'seconds': 12},
                 {'number': 3, 'description': 'The horror is revealed', 'seconds': 10}
             ],
+            'session_id': session_id,
+            'ai_generated': False,
+            'error': str(e)
+        }
+
+def generate_real_image(description, session_id):
+    """Generate a real horror image using DALL-E"""
+    try:
+        # Create a horror-optimized prompt
+        horror_prompt = f"Dark atmospheric horror scene: {description}. Cinematic lighting, shadows, eerie mood, high quality digital art, scary but not gory"
+        
+        response = openai.images.generate(
+            model="dall-e-3",
+            prompt=horror_prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1
+        )
+        
+        image_url = response.data[0].url
+        
+        return {
+            'image_url': image_url,
+            'description': description,
+            'prompt_used': horror_prompt,
+            'session_id': session_id,
+            'ai_generated': True
+        }
+        
+    except Exception as e:
+        print(f"DALL-E Error: {e}")
+        return {
+            'image_url': f'/images/{session_id}_horror.jpg',
+            'description': description,
             'session_id': session_id,
             'ai_generated': False,
             'error': str(e)
@@ -78,16 +112,16 @@ def handle_everything():
     log_what_happened()
     endpoint = request.args.get('endpoint', 'home')
     
-    # Home page - anyone can visit
+    # Home page
     if endpoint == 'home':
         return jsonify({
             'message': 'Horror Pipeline is Running!',
             'status': 'working',
-            'version': '2.0 - AI Powered',
+            'version': '2.1 - AI Story + Image',
             'time': time.time()
         })
     
-    # Test page - anyone can visit  
+    # Test page
     elif endpoint == 'test':
         return jsonify({
             'message': 'Test page works!',
@@ -96,14 +130,14 @@ def handle_everything():
             'time': time.time()
         })
     
-    # All other pages need the password
+    # Password check for other endpoints
     elif not check_password():
         return jsonify({
             'error': 'Wrong password!',
             'message': 'You need: Authorization: mysecret1303'
         }), 401
     
-    # Create a new session
+    # Create session
     elif endpoint == 'create-session':
         session_id = f"horror_{int(time.time())}"
         return jsonify({
@@ -112,13 +146,12 @@ def handle_everything():
             'message': 'New session created!'
         })
     
-    # Create a horror story - NOW WITH REAL AI!
+    # Create story (AI-powered)
     elif endpoint == 'create-story':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
         theme = data.get('theme', 'haunted house')
         
-        # Generate real AI story
         story = generate_real_story(theme, session_id)
         
         return jsonify({
@@ -126,19 +159,20 @@ def handle_everything():
             'story': story
         })
     
-    # Create a horror image (still mock for now)
+    # Create image (NOW AI-POWERED!)
     elif endpoint == 'create-image':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
-        description = data.get('description', 'scary scene')
+        description = data.get('description', 'scary horror scene')
+        
+        image_result = generate_real_image(description, session_id)
         
         return jsonify({
             'success': True,
-            'image_url': f'/images/{session_id}_horror.jpg',
-            'description': description
+            **image_result
         })
     
-    # Create a horror voice (still mock for now)
+    # Create voice (still mock)
     elif endpoint == 'create-voice':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
@@ -150,7 +184,7 @@ def handle_everything():
             'text_length': len(text)
         })
     
-    # Create the final video (still mock for now)
+    # Create video (still mock)
     elif endpoint == 'create-video':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
@@ -161,7 +195,7 @@ def handle_everything():
             'message': 'Video created successfully!'
         })
     
-    # Unknown page
+    # Unknown endpoint
     else:
         return jsonify({
             'error': 'Page not found',

@@ -1,16 +1,13 @@
 from flask import Flask, request, jsonify
 import os
 import time
-import openai
 import requests
 import base64
-from io import BytesIO
 
 app = Flask(__name__)
 
 # Configuration
 SECRET_PASSWORD = "mysecret1303"
-openai.api_key = os.getenv('OPENAI_API_KEY')
 
 def check_password():
     """Check if the request has the right password"""
@@ -26,7 +23,11 @@ def log_what_happened():
 def generate_real_story(theme, session_id):
     """Generate a real horror story using OpenAI"""
     try:
-        response = openai.chat.completions.create(
+        from openai import OpenAI
+        
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {
@@ -76,9 +77,13 @@ def generate_real_story(theme, session_id):
 def generate_real_image(description, session_id):
     """Generate a real horror image using DALL-E"""
     try:
+        from openai import OpenAI
+        
+        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
         horror_prompt = f"Dark atmospheric horror scene: {description}. Cinematic lighting, shadows, eerie mood, high quality digital art, scary but not gory"
         
-        response = openai.images.generate(
+        response = client.images.generate(
             model="dall-e-3",
             prompt=horror_prompt,
             size="1024x1024",
@@ -169,8 +174,12 @@ def create_real_video(session_id, image_url, audio_data):
         from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
         import tempfile
         
+        # Validate image URL
+        if not image_url or image_url.startswith('/images/'):
+            raise Exception("Invalid image URL - using mock image")
+        
         # Download the image
-        image_response = requests.get(image_url)
+        image_response = requests.get(image_url, timeout=30)
         if image_response.status_code != 200:
             raise Exception("Failed to download image")
         
@@ -180,15 +189,14 @@ def create_real_video(session_id, image_url, audio_data):
             img_path = img_file.name
         
         with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as audio_file:
-            if audio_data.startswith('data:audio'):
+            if audio_data and audio_data.startswith('data:audio'):
                 # Handle base64 audio
                 audio_base64 = audio_data.split(',')[1]
                 audio_bytes = base64.b64decode(audio_base64)
                 audio_file.write(audio_bytes)
+                audio_path = audio_file.name
             else:
-                # Handle regular audio file (fallback)
-                audio_file.write(b'dummy_audio')
-            audio_path = audio_file.name
+                raise Exception("Invalid audio data")
         
         # Create video clip
         image_clip = ImageClip(img_path, duration=30)  # 30 second video
@@ -201,9 +209,11 @@ def create_real_video(session_id, image_url, audio_data):
             
             # Combine image and audio
             final_clip = image_clip.set_audio(audio_clip)
-        except:
+        except Exception as audio_error:
+            print(f"Audio processing error: {audio_error}")
             # If audio fails, create silent video
             final_clip = image_clip.set_duration(30)
+            video_duration = 30
         
         # Export video
         with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as video_file:
@@ -217,8 +227,12 @@ def create_real_video(session_id, image_url, audio_data):
             logger=None
         )
         
-        # Clean up
+        # Clean up clips
         final_clip.close()
+        if 'audio_clip' in locals():
+            audio_clip.close()
+        
+        # Clean up temp files
         os.unlink(img_path)
         os.unlink(audio_path)
         
@@ -327,7 +341,7 @@ def handle_everything():
             **voice_result
         })
     
-    # Create video (NOW AI-POWERED!)
+    # Create video (AI-powered)
     elif endpoint == 'create-video':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')

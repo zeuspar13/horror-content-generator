@@ -2,12 +2,17 @@ from flask import Flask, request, jsonify
 import os
 import time
 import openai
+from elevenlabs import generate, set_api_key, voices
 
 app = Flask(__name__)
 
 # Configuration
 SECRET_PASSWORD = "mysecret1303"
 openai.api_key = os.getenv('OPENAI_API_KEY')
+elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
+
+if elevenlabs_api_key:
+    set_api_key(elevenlabs_api_key)
 
 def check_password():
     """Check if the request has the right password"""
@@ -73,7 +78,6 @@ def generate_real_story(theme, session_id):
 def generate_real_image(description, session_id):
     """Generate a real horror image using DALL-E"""
     try:
-        # Create a horror-optimized prompt
         horror_prompt = f"Dark atmospheric horror scene: {description}. Cinematic lighting, shadows, eerie mood, high quality digital art, scary but not gory"
         
         response = openai.images.generate(
@@ -104,6 +108,45 @@ def generate_real_image(description, session_id):
             'error': str(e)
         }
 
+def generate_real_voice(text, session_id):
+    """Generate real horror voice using ElevenLabs"""
+    try:
+        # Use a deep, dramatic voice for horror narration
+        # You can change this voice ID to experiment with different voices
+        voice_id = "ErXwobaYiN019PkySvjV"  # Antoni - deep, dramatic voice
+        
+        # Generate the audio
+        audio = generate(
+            text=text,
+            voice=voice_id,
+            model="eleven_monolingual_v1"
+        )
+        
+        # In a real implementation, you'd save this audio to cloud storage
+        # For now, we'll return a placeholder URL indicating success
+        audio_url = f"https://audio-storage.com/{session_id}_voice.mp3"
+        
+        return {
+            'audio_url': audio_url,
+            'text': text,
+            'text_length': len(text),
+            'voice_id': voice_id,
+            'session_id': session_id,
+            'ai_generated': True,
+            'duration_estimate': len(text) / 15  # Rough estimate: 15 chars per second
+        }
+        
+    except Exception as e:
+        print(f"ElevenLabs Error: {e}")
+        return {
+            'audio_url': f'/audio/{session_id}_voice.mp3',
+            'text': text,
+            'text_length': len(text),
+            'session_id': session_id,
+            'ai_generated': False,
+            'error': str(e)
+        }
+
 @app.route('/', methods=['GET', 'POST'])
 def handle_everything():
     """This handles ALL requests to our website"""
@@ -115,7 +158,7 @@ def handle_everything():
         return jsonify({
             'message': 'Horror Pipeline is Running!',
             'status': 'working',
-            'version': '2.1 - AI Story + Image',
+            'version': '2.2 - AI Story + Image + Voice',
             'time': time.time()
         })
     
@@ -125,6 +168,7 @@ def handle_everything():
             'message': 'Test page works!',
             'endpoint': endpoint,
             'openai_configured': bool(os.getenv('OPENAI_API_KEY')),
+            'elevenlabs_configured': bool(os.getenv('ELEVENLABS_API_KEY')),
             'time': time.time()
         })
     
@@ -157,7 +201,7 @@ def handle_everything():
             'story': story
         })
     
-    # Create image (NOW AI-POWERED!)
+    # Create image (AI-powered)
     elif endpoint == 'create-image':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
@@ -170,16 +214,17 @@ def handle_everything():
             **image_result
         })
     
-    # Create voice (still mock)
+    # Create voice (NOW AI-POWERED!)
     elif endpoint == 'create-voice':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
         text = data.get('text', '')
         
+        voice_result = generate_real_voice(text, session_id)
+        
         return jsonify({
             'success': True,
-            'audio_url': f'/audio/{session_id}_voice.mp3',
-            'text_length': len(text)
+            **voice_result
         })
     
     # Create video (still mock)

@@ -131,7 +131,6 @@ def generate_real_image(description, session_id):
 def generate_free_voice_with_timing(text, session_id):
     """Generate voice using free TTS with manual subtitle timing"""
     try:
-        # For testing, use a free TTS service or create manual timing
         print(f"Free TTS: Generating voice for {len(text)} characters")
         
         # Split text into sentences for better subtitle timing
@@ -147,30 +146,23 @@ def generate_free_voice_with_timing(text, session_id):
         for sentence in sentences:
             words = sentence.split()
             for word in words:
-                duration = len(word) / 5 + 0.3  # Base duration per word
+                duration = len(word) / 5 + 0.5  # Longer duration per word
                 subtitle_data.append({
                     'word': word,
                     'start': current_time,
                     'end': current_time + duration
                 })
-                current_time += duration + 0.1  # Small pause between words
+                current_time += duration + 0.2  # Longer pause between words
             
-            current_time += 0.5  # Pause between sentences
-        
-        # For testing purposes, create a fake audio file
-        # In production, you'd use a real free TTS service like:
-        # - gTTS (Google Text-to-Speech)
-        # - pyttsx3 (offline TTS)
-        # - Azure Cognitive Services (free tier)
-        
-        # Mock audio data for testing
-        fake_audio_base64 = "UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmEUBjeK2PH"
+            current_time += 0.8  # Longer pause between sentences
         
         print(f"Free TTS success: Generated timing for {len(subtitle_data)} words")
         
+        # For testing, we'll create a silent audio file or use no audio
+        # Return data that indicates we're using subtitle-only mode
         return {
-            'audio_url': f"data:audio/wav;base64,{fake_audio_base64}",
-            'audio_data': fake_audio_base64,
+            'audio_url': '',  # No audio for testing
+            'audio_data': '',  # No audio data
             'text': text,
             'text_length': len(text),
             'voice_id': 'free_tts_testing',
@@ -178,8 +170,8 @@ def generate_free_voice_with_timing(text, session_id):
             'ai_generated': True,
             'duration_estimate': current_time,
             'subtitle_data': subtitle_data,
-            'status': 'Free TTS with manual timing generated',
-            'service': 'free_testing'
+            'status': 'Free TTS with manual timing generated - subtitle only mode',
+            'service': 'free_testing_subtitle_only'
         }
         
     except Exception as e:
@@ -190,19 +182,20 @@ def generate_free_voice_with_timing(text, session_id):
         for i, word in enumerate(words):
             subtitle_data.append({
                 'word': word,
-                'start': i * 0.8,
-                'end': (i + 1) * 0.8
+                'start': i * 1.0,  # 1 second per word
+                'end': (i + 1) * 1.0
             })
         
         return {
-            'audio_url': f'/audio/{session_id}_voice.mp3',
+            'audio_url': '',
+            'audio_data': '',
             'text': text,
             'text_length': len(text),
             'session_id': session_id,
             'subtitle_data': subtitle_data,
             'ai_generated': False,
             'error': str(e),
-            'service': 'fallback'
+            'service': 'fallback_subtitle_only'
         }
 
 def generate_real_voice_fallback(text, session_id):
@@ -393,7 +386,11 @@ def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle
             print(f"Successfully created {len(subtitle_clips)} subtitle clips")
         
         # Combine clips efficiently
-        main_clip = image_clip.set_audio(audio_clip)
+        if has_audio and audio_clip:
+            main_clip = image_clip.set_audio(audio_clip)
+        else:
+            main_clip = image_clip  # Silent video
+            
         if subtitle_clips:
             final_clip = CompositeVideoClip([main_clip] + subtitle_clips)
         else:
@@ -407,7 +404,7 @@ def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle
         final_clip.write_videofile(
             video_path,
             fps=15,  # Reduced FPS
-            audio_codec='aac',
+            audio_codec='aac' if has_audio else None,
             codec='libx264',
             bitrate='500k',  # Lower bitrate
             verbose=False,
@@ -416,13 +413,17 @@ def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle
         
         # Clean up immediately
         final_clip.close()
-        audio_clip.close()
-        del final_clip, audio_clip, image_clip
+        if has_audio and audio_clip:
+            audio_clip.close()
+        del final_clip, image_clip
+        if has_audio and audio_clip:
+            del audio_clip
         gc.collect()
         
         # Clean up temp files
         os.unlink(img_path)
-        os.unlink(audio_path)
+        if has_audio and audio_path:
+            os.unlink(audio_path)
         
         # Convert to base64
         print("Converting to base64...")

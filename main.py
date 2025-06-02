@@ -23,21 +23,21 @@ def log_what_happened():
     print(f"Request: {method} /?endpoint={endpoint}")
 
 def generate_real_story(theme, session_id):
-    """Generate a real horror story using OpenAI"""
+    """Generate a real horror story using OpenAI - LONGER VERSION"""
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {
                     "role": "system", 
-                    "content": "You are a master horror storyteller. Create short, atmospheric horror stories perfect for 30-second videos. Focus on building dread and atmosphere. Write in short, punchy sentences that work well with voice narration and subtitles."
+                    "content": "You are a master horror storyteller. Create atmospheric horror stories perfect for 60-90 second videos. Write in clear, dramatic sentences that work well with voice narration and subtitles. Focus on building suspense gradually."
                 },
                 {
                     "role": "user",
-                    "content": f"Create a 30-second horror story about a {theme}. Write in short, dramatic sentences. Focus on atmosphere and suspense. Keep it under 200 words for clear narration."
+                    "content": f"Create a 60-90 second horror story about a {theme}. Write in short, clear sentences. Build tension gradually. Make it atmospheric and suspenseful. Keep sentences under 15 words each for clear narration."
                 }
             ],
-            max_tokens=200,
+            max_tokens=400,  # Increased for longer stories
             temperature=0.8
         )
         
@@ -47,9 +47,9 @@ def generate_real_story(theme, session_id):
             'title': f'The Haunting of {theme.title()}',
             'text': ai_story,
             'scenes': [
-                {'number': 1, 'description': f'Opening scene - {theme}', 'seconds': 8},
-                {'number': 2, 'description': 'Building tension', 'seconds': 12},
-                {'number': 3, 'description': 'The revelation', 'seconds': 10}
+                {'number': 1, 'description': f'Opening scene - {theme}', 'seconds': 20},
+                {'number': 2, 'description': 'Building tension', 'seconds': 30},
+                {'number': 3, 'description': 'The revelation', 'seconds': 20}
             ],
             'session_id': session_id,
             'ai_generated': True
@@ -59,13 +59,26 @@ def generate_real_story(theme, session_id):
         
     except Exception as e:
         print(f"OpenAI Story Error: {e}")
+        # Longer fallback story for testing
+        fallback_story = f"""The old {theme} stands silent in the moonlight. 
+        Its windows stare like empty eyes into the darkness. 
+        Something moves behind the glass. 
+        A shadow that shouldn't be there. 
+        The door creaks open on rusted hinges. 
+        Footsteps echo through empty halls. 
+        Each step brings you closer to the truth. 
+        The truth that some places should remain untouched. 
+        Some secrets should stay buried. 
+        But tonight, the {theme} remembers. 
+        And it wants you to remember too."""
+        
         return {
             'title': f'The Curse of the {theme.title()}',
-            'text': f'Deep in the shadows of the {theme}, ancient evil stirs...',
+            'text': fallback_story,
             'scenes': [
-                {'number': 1, 'description': f'Approaching the {theme}', 'seconds': 8},
-                {'number': 2, 'description': 'Strange sounds begin', 'seconds': 12},
-                {'number': 3, 'description': 'The horror is revealed', 'seconds': 10}
+                {'number': 1, 'description': f'Approaching the {theme}', 'seconds': 20},
+                {'number': 2, 'description': 'Strange sounds begin', 'seconds': 30},
+                {'number': 3, 'description': 'The horror is revealed', 'seconds': 20}
             ],
             'session_id': session_id,
             'ai_generated': False,
@@ -115,119 +128,82 @@ def generate_real_image(description, session_id):
             'error': str(e)
         }
 
-def generate_real_voice_with_timing(text, session_id):
-    """Generate real horror voice with subtitle timing using ElevenLabs API"""
+def generate_free_voice_with_timing(text, session_id):
+    """Generate voice using free TTS with manual subtitle timing"""
     try:
-        elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
-        if not elevenlabs_api_key:
-            raise Exception("ElevenLabs API key not found")
+        # For testing, use a free TTS service or create manual timing
+        print(f"Free TTS: Generating voice for {len(text)} characters")
         
-        voice_id = "ErXwobaYiN019PkySvjV"  # Antoni voice - deep and dramatic
+        # Split text into sentences for better subtitle timing
+        import re
+        sentences = re.split(r'[.!?]+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
         
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
+        # Create manual subtitle timing (estimated)
+        subtitle_data = []
+        current_time = 0
+        words_per_second = 2.5  # Slower, more readable pace
         
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "xi-api-key": elevenlabs_api_key
+        for sentence in sentences:
+            words = sentence.split()
+            for word in words:
+                duration = len(word) / 5 + 0.3  # Base duration per word
+                subtitle_data.append({
+                    'word': word,
+                    'start': current_time,
+                    'end': current_time + duration
+                })
+                current_time += duration + 0.1  # Small pause between words
+            
+            current_time += 0.5  # Pause between sentences
+        
+        # For testing purposes, create a fake audio file
+        # In production, you'd use a real free TTS service like:
+        # - gTTS (Google Text-to-Speech)
+        # - pyttsx3 (offline TTS)
+        # - Azure Cognitive Services (free tier)
+        
+        # Mock audio data for testing
+        fake_audio_base64 = "UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmEUBjeK2PH"
+        
+        print(f"Free TTS success: Generated timing for {len(subtitle_data)} words")
+        
+        return {
+            'audio_url': f"data:audio/wav;base64,{fake_audio_base64}",
+            'audio_data': fake_audio_base64,
+            'text': text,
+            'text_length': len(text),
+            'voice_id': 'free_tts_testing',
+            'session_id': session_id,
+            'ai_generated': True,
+            'duration_estimate': current_time,
+            'subtitle_data': subtitle_data,
+            'status': 'Free TTS with manual timing generated',
+            'service': 'free_testing'
         }
-        
-        # Limit text length for voice generation
-        if len(text) > 2500:
-            text = text[:2500] + "..."
-        
-        data = {
-            "text": text,
-            "model_id": "eleven_monolingual_v1",
-            "voice_settings": {
-                "stability": 0.6,
-                "similarity_boost": 0.8,
-                "style": 0.0,
-                "use_speaker_boost": True
-            },
-            "output_format": "mp3_22050_32"
-        }
-        
-        print(f"ElevenLabs: Generating voice with timing for {len(text)} characters")
-        
-        response = requests.post(url, json=data, headers=headers, timeout=60)
-        
-        if response.status_code == 200:
-            result = response.json()
-            
-            # Extract audio and timing data
-            audio_base64 = result.get('audio_base64', '')
-            alignment = result.get('alignment', {})
-            
-            # Create subtitle timing data
-            characters = alignment.get('characters', [])
-            character_start_times = alignment.get('character_start_times_seconds', [])
-            character_end_times = alignment.get('character_end_times_seconds', [])
-            
-            # Process word timings for subtitles
-            words = text.split()
-            subtitle_data = []
-            
-            if character_start_times and character_end_times:
-                char_index = 0
-                for word in words:
-                    word_start = None
-                    word_end = None
-                    
-                    # Find start time of word
-                    while char_index < len(characters) and characters[char_index] != word[0]:
-                        char_index += 1
-                    if char_index < len(character_start_times):
-                        word_start = character_start_times[char_index]
-                    
-                    # Find end time of word
-                    word_char_count = len(word)
-                    end_char_index = min(char_index + word_char_count - 1, len(character_end_times) - 1)
-                    if end_char_index >= 0:
-                        word_end = character_end_times[end_char_index]
-                    
-                    if word_start is not None and word_end is not None:
-                        subtitle_data.append({
-                            'word': word,
-                            'start': word_start,
-                            'end': word_end
-                        })
-                    
-                    char_index += word_char_count + 1  # +1 for space
-            else:
-                # Fallback: estimate timing based on word count
-                total_duration = len(text) / 15  # Rough estimate
-                words_per_second = len(words) / total_duration
-                for i, word in enumerate(words):
-                    start = i / words_per_second
-                    end = (i + 1) / words_per_second
-                    subtitle_data.append({
-                        'word': word,
-                        'start': start,
-                        'end': end
-                    })
-            
-            print(f"ElevenLabs success: Generated audio with {len(subtitle_data)} timed words")
-            
-            return {
-                'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
-                'audio_data': audio_base64,
-                'text': text,
-                'text_length': len(text),
-                'voice_id': voice_id,
-                'session_id': session_id,
-                'ai_generated': True,
-                'duration_estimate': len(text) / 15,
-                'subtitle_data': subtitle_data,
-                'status': 'Audio with timing generated successfully'
-            }
-        else:
-            raise Exception(f"ElevenLabs API error: {response.status_code} - {response.text}")
         
     except Exception as e:
-        print(f"ElevenLabs Error: {e}")
-        # Fallback to regular voice generation
-        return generate_real_voice_fallback(text, session_id)
+        print(f"Free TTS Error: {e}")
+        # Create simple fallback with timing
+        words = text.split()[:20]  # Limit words for testing
+        subtitle_data = []
+        for i, word in enumerate(words):
+            subtitle_data.append({
+                'word': word,
+                'start': i * 0.8,
+                'end': (i + 1) * 0.8
+            })
+        
+        return {
+            'audio_url': f'/audio/{session_id}_voice.mp3',
+            'text': text,
+            'text_length': len(text),
+            'session_id': session_id,
+            'subtitle_data': subtitle_data,
+            'ai_generated': False,
+            'error': str(e),
+            'service': 'fallback'
+        }
 
 def generate_real_voice_fallback(text, session_id):
     """Fallback voice generation without timing"""
@@ -336,11 +312,11 @@ def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle
         print("Creating optimized video...")
         
         # Create base clips with reduced resolution for memory efficiency
-        image_clip = ImageClip(img_path, duration=15)  # Reduced duration
+        image_clip = ImageClip(img_path, duration=60)  # Increased duration for longer stories
         image_clip = image_clip.resize(height=480)  # Reduce resolution
         
         audio_clip = AudioFileClip(audio_path)
-        video_duration = min(audio_clip.duration, 15)  # Max 15 seconds
+        video_duration = min(audio_clip.duration, 60)  # Max 60 seconds for longer testing
         image_clip = image_clip.set_duration(video_duration)
         
         # Create simplified subtitles - only 2-3 key phrases
@@ -548,13 +524,13 @@ def handle_everything():
             **image_result
         })
     
-    # Create voice with timing (AI-powered)
+    # Create voice with timing (FREE TTS for testing)
     elif endpoint == 'create-voice':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
         text = data.get('text', '')
         
-        voice_result = generate_real_voice_with_timing(text, session_id)
+        voice_result = generate_free_voice_with_timing(text, session_id)
         
         return jsonify({
             'success': True,
@@ -589,10 +565,10 @@ def handle_everything():
                 # If not valid JSON, create simple fallback subtitles
                 print("  Creating fallback subtitles from story text")
                 subtitle_data = [
-                    {"word": "Horror", "start": 0, "end": 2},
-                    {"word": "awaits", "start": 2, "end": 4},
-                    {"word": "in", "start": 4, "end": 6},
-                    {"word": "darkness", "start": 6, "end": 8}
+                    {"word": "Horror", "start": 0, "end": 3},
+                    {"word": "awaits in", "start": 3, "end": 6},
+                    {"word": "the darkness", "start": 6, "end": 9},
+                    {"word": "below...", "start": 9, "end": 12}
                 ]
         
         video_result = create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle_data)

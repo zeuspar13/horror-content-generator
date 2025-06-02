@@ -2,17 +2,12 @@ from flask import Flask, request, jsonify
 import os
 import time
 import openai
-from elevenlabs import generate, set_api_key, voices
 
 app = Flask(__name__)
 
 # Configuration
 SECRET_PASSWORD = "mysecret1303"
 openai.api_key = os.getenv('OPENAI_API_KEY')
-elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
-
-if elevenlabs_api_key:
-    set_api_key(elevenlabs_api_key)
 
 def check_password():
     """Check if the request has the right password"""
@@ -109,32 +104,54 @@ def generate_real_image(description, session_id):
         }
 
 def generate_real_voice(text, session_id):
-    """Generate real horror voice using ElevenLabs"""
+    """Generate real horror voice using ElevenLabs API"""
     try:
-        # Use a deep, dramatic voice for horror narration
-        # You can change this voice ID to experiment with different voices
-        voice_id = "ErXwobaYiN019PkySvjV"  # Antoni - deep, dramatic voice
+        import requests
         
-        # Generate the audio
-        audio = generate(
-            text=text,
-            voice=voice_id,
-            model="eleven_monolingual_v1"
-        )
+        # ElevenLabs API setup
+        elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
+        if not elevenlabs_api_key:
+            raise Exception("ElevenLabs API key not found")
         
-        # In a real implementation, you'd save this audio to cloud storage
-        # For now, we'll return a placeholder URL indicating success
-        audio_url = f"https://audio-storage.com/{session_id}_voice.mp3"
+        # Use Antoni voice (deep, dramatic) - good for horror
+        voice_id = "ErXwobaYiN019PkySvjV"
         
-        return {
-            'audio_url': audio_url,
-            'text': text,
-            'text_length': len(text),
-            'voice_id': voice_id,
-            'session_id': session_id,
-            'ai_generated': True,
-            'duration_estimate': len(text) / 15  # Rough estimate: 15 chars per second
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        
+        headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": elevenlabs_api_key
         }
+        
+        data = {
+            "text": text,
+            "model_id": "eleven_monolingual_v1",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.5
+            }
+        }
+        
+        response = requests.post(url, json=data, headers=headers)
+        
+        if response.status_code == 200:
+            # In a real implementation, you'd save the audio file to cloud storage
+            # For now, we'll return a success indicator
+            audio_url = f"https://audio-storage.com/{session_id}_voice.mp3"
+            
+            return {
+                'audio_url': audio_url,
+                'text': text,
+                'text_length': len(text),
+                'voice_id': voice_id,
+                'session_id': session_id,
+                'ai_generated': True,
+                'duration_estimate': len(text) / 15,
+                'status': 'Audio generated successfully'
+            }
+        else:
+            raise Exception(f"ElevenLabs API error: {response.status_code}")
         
     except Exception as e:
         print(f"ElevenLabs Error: {e}")

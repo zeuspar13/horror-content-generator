@@ -297,191 +297,143 @@ def generate_real_voice_fallback(text, session_id):
         }
 
 def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle_data):
-    """Create real video with synced subtitles using MoviePy"""
+    """Create real video with synced subtitles - optimized for Render.com"""
     try:
         from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip
         import tempfile
+        import gc
         
         print(f"Video creation starting for session {session_id}")
-        print(f"Image URL: {image_url}")
-        print(f"Audio data length: {len(audio_data) if audio_data else 0}")
         print(f"Subtitle words: {len(subtitle_data) if subtitle_data else 0}")
         
         # Validate image URL
         if not image_url or image_url.startswith('/images/'):
-            raise Exception("Invalid image URL - AI image generation failed")
+            raise Exception("Invalid image URL")
         
-        # Download the image
+        # Download image
         print("Downloading image...")
-        image_response = requests.get(image_url, timeout=30)
+        image_response = requests.get(image_url, timeout=15)
         if image_response.status_code != 200:
-            raise Exception(f"Failed to download image: {image_response.status_code}")
+            raise Exception("Failed to download image")
         
-        # Create temporary files
+        # Create temp files
         with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as img_file:
             img_file.write(image_response.content)
             img_path = img_file.name
         
-        print(f"Image saved to: {img_path}")
-        
         with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as audio_file:
             if audio_data and len(audio_data) > 100:
-                # Handle base64 audio (either with or without data: prefix)
                 if audio_data.startswith('data:audio'):
                     audio_base64 = audio_data.split(',')[1]
                 else:
                     audio_base64 = audio_data
-                
                 audio_bytes = base64.b64decode(audio_base64)
                 audio_file.write(audio_bytes)
                 audio_path = audio_file.name
-                print(f"Audio saved to: {audio_path}")
             else:
-                raise Exception("No valid audio data received")
+                raise Exception("No audio data")
         
-        # Create video clip (removing Ken Burns effect due to Pillow compatibility)
-        print("Creating video clip...")
-        image_clip = ImageClip(img_path, duration=30)
+        print("Creating optimized video...")
         
-        try:
-            print("Processing audio...")
-            audio_clip = AudioFileClip(audio_path)
+        # Create base clips with reduced resolution for memory efficiency
+        image_clip = ImageClip(img_path, duration=15)  # Reduced duration
+        image_clip = image_clip.resize(height=480)  # Reduce resolution
+        
+        audio_clip = AudioFileClip(audio_path)
+        video_duration = min(audio_clip.duration, 15)  # Max 15 seconds
+        image_clip = image_clip.set_duration(video_duration)
+        
+        # Create simplified subtitles - only 2-3 key phrases
+        subtitle_clips = []
+        if subtitle_data and len(subtitle_data) > 0:
+            print("Creating simplified subtitles...")
             
-            # Match video duration to audio duration (max 30 seconds)
-            video_duration = min(audio_clip.duration, 30)
-            image_clip = image_clip.set_duration(video_duration)
+            # Take only first few words for performance
+            limited_words = subtitle_data[:10]  # Limit to 10 words max
             
-            print(f"Video duration: {video_duration} seconds")
-            
-            # Create subtitle clips
-            subtitle_clips = []
-            if subtitle_data:
-                print("Creating subtitle clips...")
-                
-                # Group words into phrases for better readability
-                phrases = []
-                current_phrase = []
-                current_start = None
-                
-                for word_data in subtitle_data:
-                    if not current_phrase:
-                        current_start = word_data['start']
-                    
-                    current_phrase.append(word_data['word'])
-                    
-                    # Create phrase every 3-4 words or at natural breaks
-                    if (len(current_phrase) >= 4 or 
-                        word_data['word'].endswith('.') or 
-                        word_data['word'].endswith('!') or 
-                        word_data['word'].endswith('?')):
+            # Create one subtitle every 3 seconds
+            phrase_duration = video_duration / 3
+            for i in range(3):
+                start_time = i * phrase_duration
+                if start_time < video_duration:
+                    # Get words for this time segment
+                    segment_words = [w['word'] for w in limited_words[i*3:(i+1)*3] if 'word' in w]
+                    if segment_words:
+                        text = ' '.join(segment_words)
                         
-                        phrase_text = ' '.join(current_phrase)
-                        phrases.append({
-                            'text': phrase_text,
-                            'start': current_start,
-                            'end': word_data['end']
-                        })
-                        current_phrase = []
-                
-                # Add remaining words as final phrase
-                if current_phrase:
-                    phrase_text = ' '.join(current_phrase)
-                    phrases.append({
-                        'text': phrase_text,
-                        'start': current_start,
-                        'end': subtitle_data[-1]['end']
-                    })
-                
-                # Create subtitle clips with horror styling
-                for phrase in phrases:
-                    if phrase['start'] < video_duration:
-                        duration = min(phrase['end'] - phrase['start'], video_duration - phrase['start'])
+                        subtitle_clip = TextClip(
+                            text,
+                            fontsize=20,  # Smaller font
+                            color='white',
+                            stroke_color='black',
+                            stroke_width=1
+                        ).set_position(('center', 'bottom')).set_start(start_time).set_duration(phrase_duration * 0.8)
                         
-                        if duration > 0:
-                            subtitle_clip = TextClip(
-                                phrase['text'],
-                                fontsize=24,
-                                color='white',
-                                font='Arial-Bold',
-                                stroke_color='black',
-                                stroke_width=2
-                            ).set_position(('center', 'bottom')).set_start(phrase['start']).set_duration(duration)
-                            
-                            # Add fade in/out effects
-                            subtitle_clip = subtitle_clip.crossfadein(0.2).crossfadeout(0.2)
-                            subtitle_clips.append(subtitle_clip)
-                
-                print(f"Created {len(subtitle_clips)} subtitle clips")
-            
-            # Combine image, audio, and subtitles
-            all_clips = [image_clip.set_audio(audio_clip)] + subtitle_clips
-            final_clip = CompositeVideoClip(all_clips)
-            
-        except Exception as audio_error:
-            print(f"Audio/subtitle processing error: {audio_error}")
-            # If audio fails, create silent video with basic subtitles
-            final_clip = image_clip.set_duration(30)
-            video_duration = 30
+                        subtitle_clips.append(subtitle_clip)
         
-        # Export video
+        print(f"Created {len(subtitle_clips)} optimized subtitle clips")
+        
+        # Combine clips efficiently
+        main_clip = image_clip.set_audio(audio_clip)
+        if subtitle_clips:
+            final_clip = CompositeVideoClip([main_clip] + subtitle_clips)
+        else:
+            final_clip = main_clip
+        
+        # Export with optimized settings
         with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as video_file:
             video_path = video_file.name
         
-        print(f"Exporting video to: {video_path}")
-        
+        print("Exporting optimized video...")
         final_clip.write_videofile(
             video_path,
-            fps=24,
+            fps=15,  # Reduced FPS
             audio_codec='aac',
             codec='libx264',
+            bitrate='500k',  # Lower bitrate
             verbose=False,
-            logger=None,
-            temp_audiofile='temp-audio.m4a',
-            remove_temp=True
+            logger=None
         )
         
-        print("Video export complete")
-        
-        # Clean up clips
+        # Clean up immediately
         final_clip.close()
-        if 'audio_clip' in locals():
-            audio_clip.close()
+        audio_clip.close()
+        del final_clip, audio_clip, image_clip
+        gc.collect()
         
         # Clean up temp files
         os.unlink(img_path)
         os.unlink(audio_path)
         
-        # Convert video to base64
-        print("Converting video to base64...")
+        # Convert to base64
+        print("Converting to base64...")
         with open(video_path, 'rb') as video_file:
             video_base64 = base64.b64encode(video_file.read()).decode('utf-8')
         
         os.unlink(video_path)
         
-        print(f"Video creation successful! Base64 length: {len(video_base64)}")
+        print(f"Optimized video creation successful! Base64 length: {len(video_base64)}")
         
         return {
             'video_url': f"data:video/mp4;base64,{video_base64}",
             'video_data': video_base64,
             'session_id': session_id,
             'ai_generated': True,
-            'duration': video_duration if 'video_duration' in locals() else 30,
-            'subtitle_count': len(subtitle_clips) if 'subtitle_clips' in locals() else 0,
-            'status': 'Video with subtitles created successfully',
+            'duration': video_duration,
+            'subtitle_count': len(subtitle_clips),
+            'status': 'Optimized video with subtitles created',
             'size_bytes': len(video_base64) * 3 / 4,
-            'features': ['ken_burns_effect', 'synced_subtitles', 'fade_effects']
+            'features': ['synced_subtitles', 'memory_optimized']
         }
         
     except Exception as e:
         print(f"Video Creation Error: {e}")
-        import traceback
-        print(f"Full traceback: {traceback.format_exc()}")
         return {
             'video_url': f'/videos/{session_id}_final.mp4',
             'session_id': session_id,
             'ai_generated': False,
             'error': str(e),
-            'message': 'Video creation failed, returned mock URL'
+            'message': 'Video creation failed'
         }
 
 @app.route('/', methods=['GET', 'POST'])

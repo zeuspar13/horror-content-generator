@@ -1,6 +1,6 @@
 flask==2.3.3
 gunicorn==21.2.0
-openai==1.51.2
+openai==0.28.1
 requests==2.31.0
 moviepy==1.0.3
 imageio==2.31.5

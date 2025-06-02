@@ -210,15 +210,19 @@ def create_real_video(session_id, image_url, audio_data):
         print(f"Image saved to: {img_path}")
         
         with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as audio_file:
-            if audio_data and audio_data.startswith('data:audio'):
-                # Handle base64 audio
-                audio_base64 = audio_data.split(',')[1]
+            if audio_data and len(audio_data) > 100:
+                # Handle base64 audio (either with or without data: prefix)
+                if audio_data.startswith('data:audio'):
+                    audio_base64 = audio_data.split(',')[1]
+                else:
+                    audio_base64 = audio_data
+                
                 audio_bytes = base64.b64decode(audio_base64)
                 audio_file.write(audio_bytes)
                 audio_path = audio_file.name
                 print(f"Audio saved to: {audio_path}")
             else:
-                raise Exception("Invalid audio data - voice generation failed")
+                raise Exception("No valid audio data received")
         
         # Create video clip
         print("Creating video clip...")

@@ -339,12 +339,9 @@ def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle
             else:
                 raise Exception("No valid audio data received")
         
-        # Create video clip with Ken Burns effect (slow zoom)
-        print("Creating video clip with effects...")
+        # Create video clip (removing Ken Burns effect due to Pillow compatibility)
+        print("Creating video clip...")
         image_clip = ImageClip(img_path, duration=30)
-        
-        # Add Ken Burns effect (slow zoom in)
-        image_clip = image_clip.resize(lambda t: 1 + 0.02*t).set_position(('center','center'))
         
         try:
             print("Processing audio...")

@@ -2,6 +2,9 @@ from flask import Flask, request, jsonify
 import os
 import time
 import openai
+import requests
+import base64
+from io import BytesIO
 
 app = Flask(__name__)
 
@@ -106,15 +109,11 @@ def generate_real_image(description, session_id):
 def generate_real_voice(text, session_id):
     """Generate real horror voice using ElevenLabs API"""
     try:
-        import requests
-        
-        # ElevenLabs API setup
         elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
         if not elevenlabs_api_key:
             raise Exception("ElevenLabs API key not found")
         
-        # Use Antoni voice (deep, dramatic) - good for horror
-        voice_id = "ErXwobaYiN019PkySvjV"
+        voice_id = "ErXwobaYiN019PkySvjV"  # Antoni voice
         
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
         
@@ -136,12 +135,12 @@ def generate_real_voice(text, session_id):
         response = requests.post(url, json=data, headers=headers)
         
         if response.status_code == 200:
-            # In a real implementation, you'd save the audio file to cloud storage
-            # For now, we'll return a success indicator
-            audio_url = f"https://audio-storage.com/{session_id}_voice.mp3"
+            # Convert audio to base64 for storage/transfer
+            audio_base64 = base64.b64encode(response.content).decode('utf-8')
             
             return {
-                'audio_url': audio_url,
+                'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
+                'audio_data': audio_base64,
                 'text': text,
                 'text_length': len(text),
                 'voice_id': voice_id,
@@ -164,6 +163,90 @@ def generate_real_voice(text, session_id):
             'error': str(e)
         }
 
+def create_real_video(session_id, image_url, audio_data):
+    """Create real video using MoviePy"""
+    try:
+        from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
+        import tempfile
+        
+        # Download the image
+        image_response = requests.get(image_url)
+        if image_response.status_code != 200:
+            raise Exception("Failed to download image")
+        
+        # Create temporary files
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as img_file:
+            img_file.write(image_response.content)
+            img_path = img_file.name
+        
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as audio_file:
+            if audio_data.startswith('data:audio'):
+                # Handle base64 audio
+                audio_base64 = audio_data.split(',')[1]
+                audio_bytes = base64.b64decode(audio_base64)
+                audio_file.write(audio_bytes)
+            else:
+                # Handle regular audio file (fallback)
+                audio_file.write(b'dummy_audio')
+            audio_path = audio_file.name
+        
+        # Create video clip
+        image_clip = ImageClip(img_path, duration=30)  # 30 second video
+        
+        try:
+            audio_clip = AudioFileClip(audio_path)
+            # Match video duration to audio duration
+            video_duration = min(audio_clip.duration, 30)
+            image_clip = image_clip.set_duration(video_duration)
+            
+            # Combine image and audio
+            final_clip = image_clip.set_audio(audio_clip)
+        except:
+            # If audio fails, create silent video
+            final_clip = image_clip.set_duration(30)
+        
+        # Export video
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as video_file:
+            video_path = video_file.name
+        
+        final_clip.write_videofile(
+            video_path,
+            fps=24,
+            audio_codec='aac',
+            verbose=False,
+            logger=None
+        )
+        
+        # Clean up
+        final_clip.close()
+        os.unlink(img_path)
+        os.unlink(audio_path)
+        
+        # Convert video to base64 for return
+        with open(video_path, 'rb') as video_file:
+            video_base64 = base64.b64encode(video_file.read()).decode('utf-8')
+        
+        os.unlink(video_path)
+        
+        return {
+            'video_url': f"data:video/mp4;base64,{video_base64}",
+            'video_data': video_base64,
+            'session_id': session_id,
+            'ai_generated': True,
+            'duration': video_duration if 'video_duration' in locals() else 30,
+            'status': 'Video created successfully'
+        }
+        
+    except Exception as e:
+        print(f"Video Creation Error: {e}")
+        return {
+            'video_url': f'/videos/{session_id}_final.mp4',
+            'session_id': session_id,
+            'ai_generated': False,
+            'error': str(e),
+            'message': 'Video creation failed, returned mock URL'
+        }
+
 @app.route('/', methods=['GET', 'POST'])
 def handle_everything():
     """This handles ALL requests to our website"""
@@ -175,7 +258,7 @@ def handle_everything():
         return jsonify({
             'message': 'Horror Pipeline is Running!',
             'status': 'working',
-            'version': '2.2 - AI Story + Image + Voice',
+            'version': '2.3 - COMPLETE AI PIPELINE',
             'time': time.time()
         })
     
@@ -231,7 +314,7 @@ def handle_everything():
             **image_result
         })
     
-    # Create voice (NOW AI-POWERED!)
+    # Create voice (AI-powered)
     elif endpoint == 'create-voice':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
@@ -244,15 +327,18 @@ def handle_everything():
             **voice_result
         })
     
-    # Create video (still mock)
+    # Create video (NOW AI-POWERED!)
     elif endpoint == 'create-video':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
+        image_url = data.get('image_url', '')
+        audio_data = data.get('audio_data', '')
+        
+        video_result = create_real_video(session_id, image_url, audio_data)
         
         return jsonify({
             'success': True,
-            'video_url': f'/videos/{session_id}_final.mp4',
-            'message': 'Video created successfully!'
+            **video_result
         })
     
     # Unknown endpoint

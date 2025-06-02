@@ -6,3 +6,4 @@ moviepy==1.0.3
 imageio==2.31.5
 imageio-ffmpeg==0.4.9
 pillow==9.5.0
+gtts==2.4.0

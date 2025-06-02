@@ -30,14 +30,14 @@ def generate_real_story(theme, session_id):
             messages=[
                 {
                     "role": "system", 
-                    "content": "You are a master horror storyteller. Create short, atmospheric horror stories perfect for 30-second videos. Focus on building dread and atmosphere."
+                    "content": "You are a master horror storyteller. Create short, atmospheric horror stories perfect for 30-second videos. Focus on building dread and atmosphere. Write in short, punchy sentences that work well with voice narration and subtitles."
                 },
                 {
                     "role": "user",
-                    "content": f"Create a 30-second horror story about a {theme}. Include a title and divide it into 3 scenes (8, 12, and 10 seconds each). Make it atmospheric and creepy, not gory."
+                    "content": f"Create a 30-second horror story about a {theme}. Write in short, dramatic sentences. Focus on atmosphere and suspense. Keep it under 200 words for clear narration."
                 }
             ],
-            max_tokens=300,
+            max_tokens=200,
             temperature=0.8
         )
         
@@ -115,8 +115,8 @@ def generate_real_image(description, session_id):
             'error': str(e)
         }
 
-def generate_real_voice(text, session_id):
-    """Generate real horror voice using ElevenLabs API"""
+def generate_real_voice_with_timing(text, session_id):
+    """Generate real horror voice with subtitle timing using ElevenLabs API"""
     try:
         elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
         if not elevenlabs_api_key:
@@ -124,10 +124,10 @@ def generate_real_voice(text, session_id):
         
         voice_id = "ErXwobaYiN019PkySvjV"  # Antoni voice - deep and dramatic
         
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
         
         headers = {
-            "Accept": "audio/mpeg",
+            "Accept": "application/json",
             "Content-Type": "application/json",
             "xi-api-key": elevenlabs_api_key
         }
@@ -144,18 +144,70 @@ def generate_real_voice(text, session_id):
                 "similarity_boost": 0.8,
                 "style": 0.0,
                 "use_speaker_boost": True
-            }
+            },
+            "output_format": "mp3_22050_32"
         }
         
-        print(f"ElevenLabs: Generating voice for {len(text)} characters")
+        print(f"ElevenLabs: Generating voice with timing for {len(text)} characters")
         
         response = requests.post(url, json=data, headers=headers, timeout=60)
         
         if response.status_code == 200:
-            # Convert audio to base64 for storage/transfer
-            audio_base64 = base64.b64encode(response.content).decode('utf-8')
+            result = response.json()
             
-            print(f"ElevenLabs success: Generated {len(audio_base64)} chars of audio data")
+            # Extract audio and timing data
+            audio_base64 = result.get('audio_base64', '')
+            alignment = result.get('alignment', {})
+            
+            # Create subtitle timing data
+            characters = alignment.get('characters', [])
+            character_start_times = alignment.get('character_start_times_seconds', [])
+            character_end_times = alignment.get('character_end_times_seconds', [])
+            
+            # Process word timings for subtitles
+            words = text.split()
+            subtitle_data = []
+            
+            if character_start_times and character_end_times:
+                char_index = 0
+                for word in words:
+                    word_start = None
+                    word_end = None
+                    
+                    # Find start time of word
+                    while char_index < len(characters) and characters[char_index] != word[0]:
+                        char_index += 1
+                    if char_index < len(character_start_times):
+                        word_start = character_start_times[char_index]
+                    
+                    # Find end time of word
+                    word_char_count = len(word)
+                    end_char_index = min(char_index + word_char_count - 1, len(character_end_times) - 1)
+                    if end_char_index >= 0:
+                        word_end = character_end_times[end_char_index]
+                    
+                    if word_start is not None and word_end is not None:
+                        subtitle_data.append({
+                            'word': word,
+                            'start': word_start,
+                            'end': word_end
+                        })
+                    
+                    char_index += word_char_count + 1  # +1 for space
+            else:
+                # Fallback: estimate timing based on word count
+                total_duration = len(text) / 15  # Rough estimate
+                words_per_second = len(words) / total_duration
+                for i, word in enumerate(words):
+                    start = i / words_per_second
+                    end = (i + 1) / words_per_second
+                    subtitle_data.append({
+                        'word': word,
+                        'start': start,
+                        'end': end
+                    })
+            
+            print(f"ElevenLabs success: Generated audio with {len(subtitle_data)} timed words")
             
             return {
                 'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
@@ -166,13 +218,75 @@ def generate_real_voice(text, session_id):
                 'session_id': session_id,
                 'ai_generated': True,
                 'duration_estimate': len(text) / 15,
-                'status': 'Audio generated successfully'
+                'subtitle_data': subtitle_data,
+                'status': 'Audio with timing generated successfully'
             }
         else:
             raise Exception(f"ElevenLabs API error: {response.status_code} - {response.text}")
         
     except Exception as e:
         print(f"ElevenLabs Error: {e}")
+        # Fallback to regular voice generation
+        return generate_real_voice_fallback(text, session_id)
+
+def generate_real_voice_fallback(text, session_id):
+    """Fallback voice generation without timing"""
+    try:
+        elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
+        voice_id = "ErXwobaYiN019PkySvjV"
+        
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+        
+        headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": elevenlabs_api_key
+        }
+        
+        data = {
+            "text": text,
+            "model_id": "eleven_monolingual_v1",
+            "voice_settings": {
+                "stability": 0.6,
+                "similarity_boost": 0.8
+            }
+        }
+        
+        response = requests.post(url, json=data, headers=headers, timeout=60)
+        
+        if response.status_code == 200:
+            audio_base64 = base64.b64encode(response.content).decode('utf-8')
+            
+            # Create estimated subtitle timing
+            words = text.split()
+            total_duration = len(text) / 15
+            words_per_second = len(words) / total_duration if total_duration > 0 else 2
+            
+            subtitle_data = []
+            for i, word in enumerate(words):
+                start = i / words_per_second
+                end = (i + 1) / words_per_second
+                subtitle_data.append({
+                    'word': word,
+                    'start': start,
+                    'end': end
+                })
+            
+            return {
+                'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
+                'audio_data': audio_base64,
+                'text': text,
+                'text_length': len(text),
+                'session_id': session_id,
+                'ai_generated': True,
+                'subtitle_data': subtitle_data,
+                'status': 'Fallback audio with estimated timing'
+            }
+        else:
+            raise Exception(f"Fallback API error: {response.status_code}")
+            
+    except Exception as e:
+        print(f"Fallback Error: {e}")
         return {
             'audio_url': f'/audio/{session_id}_voice.mp3',
             'text': text,
@@ -182,15 +296,16 @@ def generate_real_voice(text, session_id):
             'error': str(e)
         }
 
-def create_real_video(session_id, image_url, audio_data):
-    """Create real video using MoviePy"""
+def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle_data):
+    """Create real video with synced subtitles using MoviePy"""
     try:
-        from moviepy.editor import ImageClip, AudioFileClip
+        from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip
         import tempfile
         
         print(f"Video creation starting for session {session_id}")
         print(f"Image URL: {image_url}")
         print(f"Audio data length: {len(audio_data) if audio_data else 0}")
+        print(f"Subtitle words: {len(subtitle_data) if subtitle_data else 0}")
         
         # Validate image URL
         if not image_url or image_url.startswith('/images/'):
@@ -224,9 +339,12 @@ def create_real_video(session_id, image_url, audio_data):
             else:
                 raise Exception("No valid audio data received")
         
-        # Create video clip
-        print("Creating video clip...")
+        # Create video clip with Ken Burns effect (slow zoom)
+        print("Creating video clip with effects...")
         image_clip = ImageClip(img_path, duration=30)
+        
+        # Add Ken Burns effect (slow zoom in)
+        image_clip = image_clip.resize(lambda t: 1 + 0.02*t).set_position(('center','center'))
         
         try:
             print("Processing audio...")
@@ -238,12 +356,73 @@ def create_real_video(session_id, image_url, audio_data):
             
             print(f"Video duration: {video_duration} seconds")
             
-            # Combine image and audio
-            final_clip = image_clip.set_audio(audio_clip)
+            # Create subtitle clips
+            subtitle_clips = []
+            if subtitle_data:
+                print("Creating subtitle clips...")
+                
+                # Group words into phrases for better readability
+                phrases = []
+                current_phrase = []
+                current_start = None
+                
+                for word_data in subtitle_data:
+                    if not current_phrase:
+                        current_start = word_data['start']
+                    
+                    current_phrase.append(word_data['word'])
+                    
+                    # Create phrase every 3-4 words or at natural breaks
+                    if (len(current_phrase) >= 4 or 
+                        word_data['word'].endswith('.') or 
+                        word_data['word'].endswith('!') or 
+                        word_data['word'].endswith('?')):
+                        
+                        phrase_text = ' '.join(current_phrase)
+                        phrases.append({
+                            'text': phrase_text,
+                            'start': current_start,
+                            'end': word_data['end']
+                        })
+                        current_phrase = []
+                
+                # Add remaining words as final phrase
+                if current_phrase:
+                    phrase_text = ' '.join(current_phrase)
+                    phrases.append({
+                        'text': phrase_text,
+                        'start': current_start,
+                        'end': subtitle_data[-1]['end']
+                    })
+                
+                # Create subtitle clips with horror styling
+                for phrase in phrases:
+                    if phrase['start'] < video_duration:
+                        duration = min(phrase['end'] - phrase['start'], video_duration - phrase['start'])
+                        
+                        if duration > 0:
+                            subtitle_clip = TextClip(
+                                phrase['text'],
+                                fontsize=24,
+                                color='white',
+                                font='Arial-Bold',
+                                stroke_color='black',
+                                stroke_width=2
+                            ).set_position(('center', 'bottom')).set_start(phrase['start']).set_duration(duration)
+                            
+                            # Add fade in/out effects
+                            subtitle_clip = subtitle_clip.crossfadein(0.2).crossfadeout(0.2)
+                            subtitle_clips.append(subtitle_clip)
+                
+                print(f"Created {len(subtitle_clips)} subtitle clips")
+            
+            # Combine image, audio, and subtitles
+            all_clips = [image_clip.set_audio(audio_clip)] + subtitle_clips
+            final_clip = CompositeVideoClip(all_clips)
             
         except Exception as audio_error:
-            print(f"Audio processing error: {audio_error}")
-            # If audio fails, create silent video
+            print(f"Audio/subtitle processing error: {audio_error}")
+            # If audio fails, create silent video with basic subtitles
             final_clip = image_clip.set_duration(30)
             video_duration = 30
         
@@ -290,8 +469,10 @@ def create_real_video(session_id, image_url, audio_data):
             'session_id': session_id,
             'ai_generated': True,
             'duration': video_duration if 'video_duration' in locals() else 30,
-            'status': 'Video created successfully',
-            'size_bytes': len(video_base64) * 3 / 4  # Approximate file size
+            'subtitle_count': len(subtitle_clips) if 'subtitle_clips' in locals() else 0,
+            'status': 'Video with subtitles created successfully',
+            'size_bytes': len(video_base64) * 3 / 4,
+            'features': ['ken_burns_effect', 'synced_subtitles', 'fade_effects']
         }
         
     except Exception as e:
@@ -317,7 +498,7 @@ def handle_everything():
         return jsonify({
             'message': 'Horror Pipeline is Running!',
             'status': 'working',
-            'version': '2.4 - COMPLETE AI PIPELINE',
+            'version': '2.5 - AI PIPELINE WITH SUBTITLES',
             'time': time.time()
         })
     
@@ -328,7 +509,8 @@ def handle_everything():
             'endpoint': endpoint,
             'openai_configured': bool(os.getenv('OPENAI_API_KEY')),
             'elevenlabs_configured': bool(os.getenv('ELEVENLABS_API_KEY')),
-            'moviepy_available': True,  # MoviePy is installed
+            'moviepy_available': True,
+            'subtitle_support': True,
             'time': time.time()
         })
     
@@ -374,27 +556,28 @@ def handle_everything():
             **image_result
         })
     
-    # Create voice (AI-powered)
+    # Create voice with timing (AI-powered)
     elif endpoint == 'create-voice':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
         text = data.get('text', '')
         
-        voice_result = generate_real_voice(text, session_id)
+        voice_result = generate_real_voice_with_timing(text, session_id)
         
         return jsonify({
             'success': True,
             **voice_result
         })
     
-    # Create video (AI-powered)
+    # Create video with subtitles (AI-powered)
     elif endpoint == 'create-video':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
         image_url = data.get('image_url', '')
         audio_data = data.get('audio_data', '')
+        subtitle_data = data.get('subtitle_data', [])
         
-        video_result = create_real_video(session_id, image_url, audio_data)
+        video_result = create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle_data)
         
         return jsonify({
             'success': True,

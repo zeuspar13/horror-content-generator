@@ -5,6 +5,14 @@ import openai
 import requests
 import base64
 
+# Fix PIL.Image.ANTIALIAS compatibility for newer Pillow versions
+try:
+    from PIL import Image
+    if not hasattr(Image, 'ANTIALIAS'):
+        Image.ANTIALIAS = Image.LANCZOS
+except:
+    pass
+
 app = Flask(__name__)
 
 # Configuration

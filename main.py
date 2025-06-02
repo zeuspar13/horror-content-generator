@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import os
 import time
+import openai
 import requests
 import base64
 
@@ -8,6 +9,7 @@ app = Flask(__name__)
 
 # Configuration
 SECRET_PASSWORD = "mysecret1303"
+openai.api_key = os.getenv('OPENAI_API_KEY')
 
 def check_password():
     """Check if the request has the right password"""
@@ -23,11 +25,7 @@ def log_what_happened():
 def generate_real_story(theme, session_id):
     """Generate a real horror story using OpenAI"""
     try:
-        from openai import OpenAI
-        
-        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
                 {
@@ -77,21 +75,15 @@ def generate_real_story(theme, session_id):
 def generate_real_image(description, session_id):
     """Generate a real horror image using DALL-E"""
     try:
-        from openai import OpenAI
-        
-        client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        
         horror_prompt = f"Dark atmospheric horror scene: {description}. Cinematic lighting, shadows, eerie mood, high quality digital art, scary but not gory"
         
-        response = client.images.generate(
-            model="dall-e-3",
+        response = openai.Image.create(
             prompt=horror_prompt,
-            size="1024x1024",
-            quality="standard",
-            n=1
+            n=1,
+            size="1024x1024"
         )
         
-        image_url = response.data[0].url
+        image_url = response['data'][0]['url']
         
         return {
             'image_url': image_url,
@@ -171,7 +163,7 @@ def generate_real_voice(text, session_id):
 def create_real_video(session_id, image_url, audio_data):
     """Create real video using MoviePy"""
     try:
-        from moviepy.editor import ImageClip, AudioFileClip, CompositeVideoClip
+        from moviepy.editor import ImageClip, AudioFileClip
         import tempfile
         
         # Validate image URL
@@ -199,7 +191,7 @@ def create_real_video(session_id, image_url, audio_data):
                 raise Exception("Invalid audio data")
         
         # Create video clip
-        image_clip = ImageClip(img_path, duration=30)  # 30 second video
+        image_clip = ImageClip(img_path, duration=30)
         
         try:
             audio_clip = AudioFileClip(audio_path)
@@ -211,7 +203,6 @@ def create_real_video(session_id, image_url, audio_data):
             final_clip = image_clip.set_audio(audio_clip)
         except Exception as audio_error:
             print(f"Audio processing error: {audio_error}")
-            # If audio fails, create silent video
             final_clip = image_clip.set_duration(30)
             video_duration = 30
         
@@ -227,16 +218,15 @@ def create_real_video(session_id, image_url, audio_data):
             logger=None
         )
         
-        # Clean up clips
+        # Clean up
         final_clip.close()
         if 'audio_clip' in locals():
             audio_clip.close()
         
-        # Clean up temp files
         os.unlink(img_path)
         os.unlink(audio_path)
         
-        # Convert video to base64 for return
+        # Convert video to base64
         with open(video_path, 'rb') as video_file:
             video_base64 = base64.b64encode(video_file.read()).decode('utf-8')
         
@@ -267,7 +257,6 @@ def handle_everything():
     log_what_happened()
     endpoint = request.args.get('endpoint', 'home')
     
-    # Home page
     if endpoint == 'home':
         return jsonify({
             'message': 'Horror Pipeline is Running!',
@@ -276,7 +265,6 @@ def handle_everything():
             'time': time.time()
         })
     
-    # Test page
     elif endpoint == 'test':
         return jsonify({
             'message': 'Test page works!',
@@ -286,14 +274,12 @@ def handle_everything():
             'time': time.time()
         })
     
-    # Password check for other endpoints
     elif not check_password():
         return jsonify({
             'error': 'Wrong password!',
             'message': 'You need: Authorization: mysecret1303'
         }), 401
     
-    # Create session
     elif endpoint == 'create-session':
         session_id = f"horror_{int(time.time())}"
         return jsonify({
@@ -302,7 +288,6 @@ def handle_everything():
             'message': 'New session created!'
         })
     
-    # Create story (AI-powered)
     elif endpoint == 'create-story':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
@@ -315,7 +300,6 @@ def handle_everything():
             'story': story
         })
     
-    # Create image (AI-powered)
     elif endpoint == 'create-image':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
@@ -328,7 +312,6 @@ def handle_everything():
             **image_result
         })
     
-    # Create voice (AI-powered)
     elif endpoint == 'create-voice':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
@@ -341,7 +324,6 @@ def handle_everything():
             **voice_result
         })
     
-    # Create video (AI-powered)
     elif endpoint == 'create-video':
         data = request.get_json() or {}
         session_id = data.get('session_id', 'unknown')
@@ -355,7 +337,6 @@ def handle_everything():
             **video_result
         })
     
-    # Unknown endpoint
     else:
         return jsonify({
             'error': 'Page not found',

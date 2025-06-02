@@ -199,6 +199,113 @@ def generate_free_voice_with_timing(text, session_id):
             'service': 'fallback_timing_only'
         }
 
+def generate_enhanced_voice_with_whisper_timing(text, session_id):
+    """Enhanced voice generation with Whisper for precise subtitle timing"""
+    try:
+        print(f"Enhanced Voice: Generating for {len(text)} characters")
+        
+        # First, generate audio with Google TTS (your existing method)
+        from gtts import gTTS
+        import tempfile
+        
+        # Generate TTS audio
+        tts = gTTS(text=text, lang='en', slow=False)
+        
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_audio:
+            tts.save(temp_audio.name)
+            temp_audio_path = temp_audio.name
+        
+        # Use Whisper for precise timing (if available)
+        try:
+            print("Loading Whisper model for precise timing...")
+            import whisper
+            import torch
+            import gc
+            
+            # Use tiny model for speed on Render.com
+            model = whisper.load_model("tiny")
+            
+            # Transcribe with word-level timestamps
+            result = model.transcribe(
+                temp_audio_path, 
+                word_timestamps=True,
+                language='en'
+            )
+            
+            # Extract precise word timings
+            subtitle_data = []
+            for segment in result.get('segments', []):
+                for word_info in segment.get('words', []):
+                    subtitle_data.append({
+                        'word': word_info['word'].strip(),
+                        'start': word_info['start'],
+                        'end': word_info['end'],
+                        'confidence': word_info.get('probability', 1.0)
+                    })
+            
+            print(f"Whisper success: {len(subtitle_data)} precisely timed words")
+            timing_method = "whisper_precise"
+            
+            # Clean up memory
+            del model
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+            
+        except Exception as whisper_error:
+            print(f"Whisper failed, using manual timing: {whisper_error}")
+            # Fallback to your existing manual timing
+            subtitle_data = generate_manual_timing(text)
+            timing_method = "manual_fallback"
+        
+        # Convert audio to base64
+        with open(temp_audio_path, 'rb') as audio_file:
+            audio_bytes = audio_file.read()
+            audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        os.unlink(temp_audio_path)
+        
+        return {
+            'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
+            'audio_data': audio_base64,
+            'text': text,
+            'text_length': len(text),
+            'voice_id': f'google_tts_{timing_method}',
+            'session_id': session_id,
+            'ai_generated': True,
+            'duration_estimate': subtitle_data[-1]['end'] if subtitle_data else 60,
+            'subtitle_data': subtitle_data,
+            'timing_method': timing_method,
+            'status': f'Enhanced voice with {timing_method} timing',
+            'service': 'google_tts_enhanced'
+        }
+        
+    except Exception as e:
+        print(f"Enhanced Voice Error: {e}")
+        # Complete fallback to your existing method
+        return generate_free_voice_with_timing(text, session_id)
+
+def generate_manual_timing(text):
+    """Manual timing logic as fallback"""
+    words = text.split()
+    subtitle_data = []
+    current_time = 0
+    
+    for word in words:
+        char_duration = len(word) * 0.08
+        word_duration = max(char_duration, 0.4)
+        
+        subtitle_data.append({
+            'word': word,
+            'start': current_time,
+            'end': current_time + word_duration,
+            'confidence': 1.0  # Manual timing always "confident"
+        })
+        
+        current_time += word_duration + 0.15
+    
+    return subtitle_data
+
 def generate_real_voice_fallback(text, session_id):
     """Fallback voice generation without timing"""
     try:
@@ -454,7 +561,7 @@ def handle_everything():
         return jsonify({
             'message': 'Horror Pipeline is Running!',
             'status': 'working',
-            'version': '2.5 - AI PIPELINE WITH SUBTITLES',
+            'version': '2.6 - AI PIPELINE WITH ENHANCED SUBTITLES',
             'time': time.time()
         })
     
@@ -466,6 +573,7 @@ def handle_everything():
             'elevenlabs_configured': bool(os.getenv('ELEVENLABS_API_KEY')),
             'moviepy_available': True,
             'subtitle_support': True,
+            'whisper_available': False,  # Will be True when requirements updated
             'time': time.time()
         })
     
@@ -513,6 +621,29 @@ def handle_everything():
         text = data.get('text', '')
         
         voice_result = generate_free_voice_with_timing(text, session_id)
+        
+        return jsonify({
+            'success': True,
+            **voice_result
+        })
+    
+    elif endpoint == 'create-voice-enhanced':
+        data = request.get_json() or {}
+        session_id = data.get('session_id', 'unknown')
+        text = data.get('text', '')
+        
+        print(f"Enhanced voice request: {session_id}, text length: {len(text)}")
+        
+        # Try enhanced version first, fallback to original if it fails
+        try:
+            voice_result = generate_enhanced_voice_with_whisper_timing(text, session_id)
+            print(f"Enhanced voice successful: {voice_result.get('timing_method', 'unknown')}")
+        except Exception as e:
+            print(f"Enhanced voice failed, using original method: {e}")
+            voice_result = generate_free_voice_with_timing(text, session_id)
+            # Add flag to indicate fallback was used
+            voice_result['enhanced_attempted'] = True
+            voice_result['enhanced_error'] = str(e)
         
         return jsonify({
             'success': True,

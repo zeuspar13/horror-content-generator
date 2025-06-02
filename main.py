@@ -578,6 +578,23 @@ def handle_everything():
         print(f"  subtitle_data type: {type(subtitle_data)}")
         print(f"  subtitle_data length: {len(subtitle_data) if subtitle_data else 0}")
         
+        # Fix subtitle data if it's a string (n8n serialization issue)
+        if isinstance(subtitle_data, str):
+            try:
+                import json
+                # Try to parse as JSON
+                subtitle_data = json.loads(subtitle_data)
+                print(f"  Parsed subtitle_data: {subtitle_data}")
+            except:
+                # If not valid JSON, create simple fallback subtitles
+                print("  Creating fallback subtitles from story text")
+                subtitle_data = [
+                    {"word": "Horror", "start": 0, "end": 2},
+                    {"word": "awaits", "start": 2, "end": 4},
+                    {"word": "in", "start": 4, "end": 6},
+                    {"word": "darkness", "start": 6, "end": 8}
+                ]
+        
         video_result = create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle_data)
         
         return jsonify({

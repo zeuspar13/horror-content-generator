@@ -129,61 +129,90 @@ def generate_real_image(description, session_id):
         }
 
 def generate_free_voice_with_timing(text, session_id):
-    """Generate voice using free TTS with manual subtitle timing"""
+    """Generate voice using Google TTS (free) with manual subtitle timing"""
     try:
-        print(f"Free TTS: Generating voice for {len(text)} characters")
+        print(f"Google TTS: Generating voice for {len(text)} characters")
         
-        # Split text into sentences for better subtitle timing
-        import re
-        sentences = re.split(r'[.!?]+', text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # Use Google Text-to-Speech (free)
+        from gtts import gTTS
+        import tempfile
         
-        # Create manual subtitle timing (estimated)
+        # Create TTS audio
+        tts = gTTS(text=text, lang='en', slow=False)
+        
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_audio:
+            tts.save(temp_audio.name)
+            temp_audio_path = temp_audio.name
+        
+        # Read the audio file and convert to base64
+        with open(temp_audio_path, 'rb') as audio_file:
+            audio_bytes = audio_file.read()
+            audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        # Clean up temp file
+        os.unlink(temp_audio_path)
+        
+        # Create manual subtitle timing based on text length
+        # Google TTS speaks at ~150-180 words per minute (2.5-3 words per second)
+        words = text.split()
         subtitle_data = []
         current_time = 0
-        words_per_second = 2.5  # Slower, more readable pace
+        words_per_second = 2.2  # Slightly slower for readability
         
-        for sentence in sentences:
-            words = sentence.split()
-            for word in words:
-                duration = len(word) / 5 + 0.5  # Longer duration per word
-                subtitle_data.append({
-                    'word': word,
-                    'start': current_time,
-                    'end': current_time + duration
-                })
-                current_time += duration + 0.2  # Longer pause between words
+        for word in words:
+            # Base duration on word length
+            char_duration = len(word) * 0.08  # 80ms per character
+            word_duration = max(char_duration, 0.4)  # Minimum 400ms per word
             
-            current_time += 0.8  # Longer pause between sentences
+            subtitle_data.append({
+                'word': word,
+                'start': current_time,
+                'end': current_time + word_duration
+            })
+            
+            current_time += word_duration + 0.15  # 150ms pause between words
         
-        print(f"Free TTS success: Generated timing for {len(subtitle_data)} words")
+        # Add sentence pauses
+        sentences = text.split('.')
+        if len(sentences) > 1:
+            # Adjust timing for sentence breaks
+            sentence_words_count = 0
+            for sentence in sentences[:-1]:  # Skip last empty element
+                sentence_words = sentence.strip().split()
+                sentence_words_count += len(sentence_words)
+                if sentence_words_count < len(subtitle_data):
+                    # Add extra pause after sentence
+                    for i in range(sentence_words_count, len(subtitle_data)):
+                        subtitle_data[i]['start'] += 0.3
+                        subtitle_data[i]['end'] += 0.3
         
-        # For testing, we'll create a silent audio file or use no audio
-        # Return data that indicates we're using subtitle-only mode
+        print(f"Google TTS success: Generated audio with {len(subtitle_data)} timed words")
+        
         return {
-            'audio_url': '',  # No audio for testing
-            'audio_data': '',  # No audio data
+            'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
+            'audio_data': audio_base64,
             'text': text,
             'text_length': len(text),
-            'voice_id': 'free_tts_testing',
+            'voice_id': 'google_tts_free',
             'session_id': session_id,
             'ai_generated': True,
             'duration_estimate': current_time,
             'subtitle_data': subtitle_data,
-            'status': 'Free TTS with manual timing generated - subtitle only mode',
-            'service': 'free_testing_subtitle_only'
+            'status': 'Google TTS with manual timing generated',
+            'service': 'google_tts_free'
         }
         
     except Exception as e:
-        print(f"Free TTS Error: {e}")
-        # Create simple fallback with timing
-        words = text.split()[:20]  # Limit words for testing
+        print(f"Google TTS Error: {e}")
+        # Fallback to estimated timing without audio
+        words = text.split()[:30]  # Limit for testing
         subtitle_data = []
         for i, word in enumerate(words):
             subtitle_data.append({
                 'word': word,
-                'start': i * 1.0,  # 1 second per word
-                'end': (i + 1) * 1.0
+                'start': i * 0.6,  # 600ms per word
+                'end': (i + 1) * 0.6
             })
         
         return {
@@ -195,7 +224,7 @@ def generate_free_voice_with_timing(text, session_id):
             'subtitle_data': subtitle_data,
             'ai_generated': False,
             'error': str(e),
-            'service': 'fallback_subtitle_only'
+            'service': 'fallback_timing_only'
         }
 
 def generate_real_voice_fallback(text, session_id):

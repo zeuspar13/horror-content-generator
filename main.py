@@ -347,31 +347,74 @@ def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle
         subtitle_clips = []
         if subtitle_data and len(subtitle_data) > 0:
             print("Creating simplified subtitles...")
+            print(f"Sample subtitle data: {subtitle_data[:3]}")  # Debug first 3 items
             
-            # Take only first few words for performance
-            limited_words = subtitle_data[:10]  # Limit to 10 words max
-            
-            # Create one subtitle every 3 seconds
-            phrase_duration = video_duration / 3
-            for i in range(3):
-                start_time = i * phrase_duration
-                if start_time < video_duration:
-                    # Get words for this time segment
-                    segment_words = [w['word'] for w in limited_words[i*3:(i+1)*3] if 'word' in w]
-                    if segment_words:
-                        text = ' '.join(segment_words)
+            # Check the format of subtitle data
+            if isinstance(subtitle_data, list) and len(subtitle_data) > 0:
+                # Handle different subtitle data formats
+                if isinstance(subtitle_data[0], dict):
+                    # Format: [{"word": "text", "start": 0.1, "end": 0.5}, ...]
+                    words = []
+                    for item in subtitle_data[:10]:  # Limit to 10 words
+                        if 'word' in item and 'start' in item:
+                            words.append(item['word'])
+                        elif 'text' in item:  # Alternative format
+                            words.append(item['text'])
+                        elif isinstance(item, str):  # Just strings
+                            words.append(item)
+                    
+                    if words:
+                        # Create 3 subtitle segments
+                        words_per_segment = max(1, len(words) // 3)
+                        segment_duration = video_duration / 3
                         
+                        for i in range(3):
+                            start_time = i * segment_duration
+                            if start_time < video_duration:
+                                # Get words for this segment
+                                start_word_idx = i * words_per_segment
+                                end_word_idx = min((i + 1) * words_per_segment, len(words))
+                                segment_words = words[start_word_idx:end_word_idx]
+                                
+                                if segment_words:
+                                    text = ' '.join(segment_words)
+                                    
+                                    try:
+                                        subtitle_clip = TextClip(
+                                            text,
+                                            fontsize=20,
+                                            color='white',
+                                            stroke_color='black',
+                                            stroke_width=1
+                                        ).set_position(('center', 'bottom')).set_start(start_time).set_duration(segment_duration * 0.8)
+                                        
+                                        subtitle_clips.append(subtitle_clip)
+                                        print(f"Created subtitle: '{text}' at {start_time}s")
+                                    except Exception as subtitle_error:
+                                        print(f"Error creating subtitle clip: {subtitle_error}")
+                                        # Create simple text overlay as fallback
+                                        continue
+                
+                elif isinstance(subtitle_data[0], str):
+                    # Format: ["word1", "word2", ...]
+                    words = subtitle_data[:10]
+                    text = ' '.join(words)
+                    
+                    try:
                         subtitle_clip = TextClip(
                             text,
-                            fontsize=20,  # Smaller font
+                            fontsize=20,
                             color='white',
                             stroke_color='black',
                             stroke_width=1
-                        ).set_position(('center', 'bottom')).set_start(start_time).set_duration(phrase_duration * 0.8)
+                        ).set_position(('center', 'bottom')).set_start(0).set_duration(video_duration * 0.8)
                         
                         subtitle_clips.append(subtitle_clip)
-        
-        print(f"Created {len(subtitle_clips)} optimized subtitle clips")
+                        print(f"Created single subtitle: '{text}'")
+                    except Exception as subtitle_error:
+                        print(f"Error creating subtitle: {subtitle_error}")
+            
+            print(f"Successfully created {len(subtitle_clips)} subtitle clips")
         
         # Combine clips efficiently
         main_clip = image_clip.set_audio(audio_clip)
@@ -525,6 +568,15 @@ def handle_everything():
         image_url = data.get('image_url', '')
         audio_data = data.get('audio_data', '')
         subtitle_data = data.get('subtitle_data', [])
+        
+        # Debug logging
+        print(f"Video creation request data:")
+        print(f"  session_id: {session_id}")
+        print(f"  image_url length: {len(image_url) if image_url else 0}")
+        print(f"  audio_data length: {len(audio_data) if audio_data else 0}")
+        print(f"  subtitle_data: {subtitle_data}")
+        print(f"  subtitle_data type: {type(subtitle_data)}")
+        print(f"  subtitle_data length: {len(subtitle_data) if subtitle_data else 0}")
         
         video_result = create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle_data)
         

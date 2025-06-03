@@ -6,7 +6,7 @@ requests==2.31.0
 Pillow==10.0.1
 gunicorn==21.2.0
 
-# Added for Whisper subtitles
+# Added for Whisper-based subtitle timing
 openai-whisper==20231117
 torch==2.1.0
 torchaudio==2.1.0

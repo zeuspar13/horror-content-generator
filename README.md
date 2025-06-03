@@ -2,8 +2,8 @@
 
 This repository includes everything needed to:
 
-1. **Phase 1**: Fix your n8n HTTP nodes so that the current pipeline (Story → Image → Voice → Video) works again.
-2. **Phase 2**: Add Whisper-based subtitle timing (while preserving backward compatibility), test locally, deploy to Render staging, and then switch n8n to the new enhanced endpoint.
+1. **Phase 1**: Fix your n8n HTTP nodes so that the current pipeline (Story → Image → Voice → Video) works again.
+2. **Phase 2**: Add Whisper-based subtitle timing (while preserving backward compatibility), test locally, deploy to Render staging, and then switch n8n to the new enhanced endpoint.
 
 ---
 
@@ -140,17 +140,17 @@ Follow these steps to make sure each n8n node sends exactly the JSON your Flask 
 
 ### 1.6 – Execute Full Workflow
 
-- Click **Execute Workflow** in n8n.  
+- Click **Execute Workflow** in n8n.
 - If each step returns a successful response (Story, Image, Voice, Video), you have completed Phase 1.
 
 ---
 
-## Phase 2: Add Whisper-based Subtitles
+## Phase 2: Add Whisper-based Subtitles
 
 > **Important**: Only begin Phase 2 once Phase 1 is fully working.
 
 ### 2.1 – Create a Git Branch & Update Dependencies
 
-1. In your local project folder:
+1. In your local project folder, open a terminal and run:
    ```bash
    git checkout -b subtitle/whisper-timing

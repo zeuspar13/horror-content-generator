@@ -4,6 +4,7 @@ import time
 import openai
 import requests
 import base64
+import random
 
 # Fix PIL.Image.ANTIALIAS compatibility for newer Pillow versions
 try:
@@ -120,30 +121,50 @@ def generate_real_image(description, session_id):
             'error': str(e)
         }
 
-def generate_free_voice_with_timing(text, session_id):
-    """Generate voice using Google TTS (free) with manual subtitle timing"""
+def generate_voice_with_retry_and_url(text, session_id):
+    """Generate voice with rate limit handling and return HTTP URL"""
     try:
-        print(f"Google TTS: Generating voice for {len(text)} characters")
+        print(f"Voice generation: Generating for {len(text)} characters")
         
         from gtts import gTTS
         import tempfile
         
-        tts = gTTS(text=text, lang='en', slow=False)
+        # Add random delay to avoid rate limits
+        delay = random.uniform(2, 5)
+        print(f"Adding {delay:.1f}s delay to avoid rate limits")
+        time.sleep(delay)
         
+        # Try with slower speech and better error handling
+        try:
+            tts = gTTS(text=text, lang='en', slow=False)
+        except Exception as fast_error:
+            print(f"Fast TTS failed: {fast_error}, trying slow...")
+            time.sleep(3)
+            try:
+                tts = gTTS(text=text, lang='en', slow=True)
+            except Exception as slow_error:
+                print(f"Slow TTS also failed: {slow_error}")
+                raise slow_error
+        
+        # Save to temporary file
         with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_audio:
             tts.save(temp_audio.name)
             temp_audio_path = temp_audio.name
         
+        # Read the audio file
         with open(temp_audio_path, 'rb') as audio_file:
             audio_bytes = audio_file.read()
-            audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-        
+            
+        # Clean up temp file
         os.unlink(temp_audio_path)
         
+        # Convert to base64 data URL
+        audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        # Generate manual timing since we have successful audio
         words = text.split()
         subtitle_data = []
         current_time = 0
-        words_per_second = 2.2
         
         for word in words:
             char_duration = len(word) * 0.08
@@ -157,6 +178,7 @@ def generate_free_voice_with_timing(text, session_id):
             
             current_time += word_duration + 0.15
         
+        # Add pauses for punctuation
         sentences = text.split('.')
         if len(sentences) > 1:
             sentence_words_count = 0
@@ -164,35 +186,39 @@ def generate_free_voice_with_timing(text, session_id):
                 sentence_words = sentence.strip().split()
                 sentence_words_count += len(sentence_words)
                 if sentence_words_count < len(subtitle_data):
+                    # Add pause after sentence
                     for i in range(sentence_words_count, len(subtitle_data)):
                         subtitle_data[i]['start'] += 0.3
                         subtitle_data[i]['end'] += 0.3
         
-        print(f"Google TTS success: Generated audio with {len(subtitle_data)} timed words")
+        print(f"Voice generation successful: {len(subtitle_data)} timed words")
         
         return {
-            'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
+            'audio_url': f"data:audio/mp3;base64,{audio_base64}",
             'audio_data': audio_base64,
             'text': text,
             'text_length': len(text),
-            'voice_id': 'google_tts_free',
             'session_id': session_id,
             'ai_generated': True,
             'duration_estimate': current_time,
             'subtitle_data': subtitle_data,
-            'status': 'Google TTS with manual timing generated',
-            'service': 'google_tts_free'
+            'status': 'Voice generated with rate limit handling',
+            'service': 'google_tts_retry'
         }
         
     except Exception as e:
-        print(f"Google TTS Error: {e}")
-        words = text.split()[:30]
+        print(f"Voice generation error: {e}")
+        
+        # Enhanced fallback: return timing-only data with better estimates
+        words = text.split()[:30]  # Limit to prevent long processing
         subtitle_data = []
         for i, word in enumerate(words):
+            start_time = i * 0.6
+            end_time = (i + 1) * 0.6
             subtitle_data.append({
                 'word': word,
-                'start': i * 0.6,
-                'end': (i + 1) * 0.6
+                'start': start_time,
+                'end': end_time
             })
         
         return {
@@ -204,7 +230,8 @@ def generate_free_voice_with_timing(text, session_id):
             'subtitle_data': subtitle_data,
             'ai_generated': False,
             'error': str(e),
-            'service': 'fallback_timing_only'
+            'service': 'fallback_timing_only',
+            'status': 'Audio generation failed, returning timing data only'
         }
 
 def generate_enhanced_voice_with_whisper_timing(text, session_id):
@@ -212,352 +239,55 @@ def generate_enhanced_voice_with_whisper_timing(text, session_id):
     try:
         print(f"Enhanced Voice: Generating for {len(text)} characters")
         
-        # First, generate audio with Google TTS (your existing method)
-        from gtts import gTTS
-        import tempfile
+        # First, try our improved TTS method
+        voice_result = generate_voice_with_retry_and_url(text, session_id)
         
-        # Generate TTS audio
-        tts = gTTS(text=text, lang='en', slow=False)
+        # If TTS was successful, try to enhance with Whisper
+        if voice_result.get('ai_generated', False) and voice_result.get('audio_data'):
+            try:
+                print("Attempting Whisper enhancement...")
+                import whisper
+                import tempfile
+                
+                # Save audio to temp file for Whisper
+                audio_bytes = base64.b64decode(voice_result['audio_data'])
+                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_audio:
+                    temp_audio.write(audio_bytes)
+                    temp_audio_path = temp_audio.name
+                
+                # Use tiny model for speed
+                model = whisper.load_model("tiny")
+                result = model.transcribe(temp_audio_path, word_timestamps=True, language='en')
+                
+                # Extract precise word timings
+                enhanced_subtitle_data = []
+                for segment in result.get('segments', []):
+                    for word_info in segment.get('words', []):
+                        enhanced_subtitle_data.append({
+                            'word': word_info['word'].strip(),
+                            'start': word_info['start'],
+                            'end': word_info['end'],
+                            'confidence': word_info.get('probability', 1.0)
+                        })
+                
+                # Clean up
+                os.unlink(temp_audio_path)
+                del model
+                
+                if enhanced_subtitle_data:
+                    voice_result['subtitle_data'] = enhanced_subtitle_data
+                    voice_result['timing_method'] = 'whisper_enhanced'
+                    print(f"Whisper enhancement successful: {len(enhanced_subtitle_data)} precisely timed words")
+                
+            except Exception as whisper_error:
+                print(f"Whisper enhancement failed: {whisper_error}")
+                voice_result['timing_method'] = 'manual_fallback'
         
-        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_audio:
-            tts.save(temp_audio.name)
-            temp_audio_path = temp_audio.name
-        
-        # Use Whisper for precise timing (if available)
-        try:
-            print("Loading Whisper model for precise timing...")
-            import whisper
-            import torch
-            import gc
-            
-            # Use tiny model for speed on Render.com
-            model = whisper.load_model("tiny")
-            
-            # Transcribe with word-level timestamps
-            result = model.transcribe(
-                temp_audio_path, 
-                word_timestamps=True,
-                language='en'
-            )
-            
-            # Extract precise word timings
-            subtitle_data = []
-            for segment in result.get('segments', []):
-                for word_info in segment.get('words', []):
-                    subtitle_data.append({
-                        'word': word_info['word'].strip(),
-                        'start': word_info['start'],
-                        'end': word_info['end'],
-                        'confidence': word_info.get('probability', 1.0)
-                    })
-            
-            print(f"Whisper success: {len(subtitle_data)} precisely timed words")
-            timing_method = "whisper_precise"
-            
-            # Clean up memory
-            del model
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            gc.collect()
-            
-        except Exception as whisper_error:
-            print(f"Whisper failed, using manual timing: {whisper_error}")
-            # Fallback to your existing manual timing
-            subtitle_data = generate_manual_timing(text)
-            timing_method = "manual_fallback"
-        
-        # Convert audio to base64
-        with open(temp_audio_path, 'rb') as audio_file:
-            audio_bytes = audio_file.read()
-            audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
-        
-        os.unlink(temp_audio_path)
-        
-        return {
-            'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
-            'audio_data': audio_base64,
-            'text': text,
-            'text_length': len(text),
-            'voice_id': f'google_tts_{timing_method}',
-            'session_id': session_id,
-            'ai_generated': True,
-            'duration_estimate': subtitle_data[-1]['end'] if subtitle_data else 60,
-            'subtitle_data': subtitle_data,
-            'timing_method': timing_method,
-            'status': f'Enhanced voice with {timing_method} timing',
-            'service': 'google_tts_enhanced'
-        }
+        return voice_result
         
     except Exception as e:
         print(f"Enhanced Voice Error: {e}")
-        # Complete fallback to your existing method
-        return generate_free_voice_with_timing(text, session_id)
-
-def generate_manual_timing(text):
-    """Manual timing logic as fallback"""
-    words = text.split()
-    subtitle_data = []
-    current_time = 0
-    
-    for word in words:
-        char_duration = len(word) * 0.08
-        word_duration = max(char_duration, 0.4)
-        
-        subtitle_data.append({
-            'word': word,
-            'start': current_time,
-            'end': current_time + word_duration,
-            'confidence': 1.0  # Manual timing always "confident"
-        })
-        
-        current_time += word_duration + 0.15
-    
-    return subtitle_data
-
-def generate_real_voice_fallback(text, session_id):
-    """Fallback voice generation without timing"""
-    try:
-        elevenlabs_api_key = os.getenv('ELEVENLABS_API_KEY')
-        voice_id = "ErXwobaYiN019PkySvjV"
-        
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-        
-        headers = {
-            "Accept": "audio/mpeg",
-            "Content-Type": "application/json",
-            "xi-api-key": elevenlabs_api_key
-        }
-        
-        data = {
-            "text": text,
-            "model_id": "eleven_monolingual_v1",
-            "voice_settings": {
-                "stability": 0.6,
-                "similarity_boost": 0.8
-            }
-        }
-        
-        response = requests.post(url, json=data, headers=headers, timeout=60)
-        
-        if response.status_code == 200:
-            audio_base64 = base64.b64encode(response.content).decode('utf-8')
-            
-            words = text.split()
-            total_duration = len(text) / 15
-            words_per_second = len(words) / total_duration if total_duration > 0 else 2
-            
-            subtitle_data = []
-            for i, word in enumerate(words):
-                start = i / words_per_second
-                end = (i + 1) / words_per_second
-                subtitle_data.append({
-                    'word': word,
-                    'start': start,
-                    'end': end
-                })
-            
-            return {
-                'audio_url': f"data:audio/mpeg;base64,{audio_base64}",
-                'audio_data': audio_base64,
-                'text': text,
-                'text_length': len(text),
-                'session_id': session_id,
-                'ai_generated': True,
-                'subtitle_data': subtitle_data,
-                'status': 'Fallback audio with estimated timing'
-            }
-        else:
-            raise Exception(f"Fallback API error: {response.status_code}")
-            
-    except Exception as e:
-        print(f"Fallback Error: {e}")
-        return {
-            'audio_url': f'/audio/{session_id}_voice.mp3',
-            'text': text,
-            'text_length': len(text),
-            'session_id': session_id,
-            'ai_generated': False,
-            'error': str(e)
-        }
-
-def create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle_data):
-    """Create real video with synced subtitles - optimized for Render.com"""
-    try:
-        from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip
-        import tempfile
-        import gc
-        
-        print(f"Video creation starting for session {session_id}")
-        print(f"Subtitle words: {len(subtitle_data) if subtitle_data else 0}")
-        
-        if not image_url or image_url.startswith('/images/'):
-            raise Exception("Invalid image URL")
-        
-        print("Downloading image...")
-        image_response = requests.get(image_url, timeout=15)
-        if image_response.status_code != 200:
-            raise Exception("Failed to download image")
-        
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as img_file:
-            img_file.write(image_response.content)
-            img_path = img_file.name
-        
-        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as audio_file:
-            if audio_data and len(audio_data) > 100:
-                if audio_data.startswith('data:audio'):
-                    audio_base64 = audio_data.split(',')[1]
-                else:
-                    audio_base64 = audio_data
-                audio_bytes = base64.b64decode(audio_base64)
-                audio_file.write(audio_bytes)
-                audio_path = audio_file.name
-                has_audio = True
-            else:
-                has_audio = False
-                audio_path = None
-        
-        print("Creating optimized video...")
-        
-        image_clip = ImageClip(img_path, duration=60)
-        image_clip = image_clip.resize(height=480)
-        
-        if has_audio and audio_path:
-            audio_clip = AudioFileClip(audio_path)
-            video_duration = min(audio_clip.duration, 60)
-            image_clip = image_clip.set_duration(video_duration)
-        else:
-            video_duration = 60
-            audio_clip = None
-        
-        subtitle_clips = []
-        if subtitle_data and len(subtitle_data) > 0:
-            print("Creating simplified subtitles...")
-            
-            if isinstance(subtitle_data, list) and len(subtitle_data) > 0:
-                if isinstance(subtitle_data[0], dict):
-                    words = []
-                    for item in subtitle_data[:10]:
-                        if 'word' in item:
-                            words.append(item['word'])
-                        elif 'text' in item:
-                            words.append(item['text'])
-                        elif isinstance(item, str):
-                            words.append(item)
-                    
-                    if words:
-                        words_per_segment = max(1, len(words) // 3)
-                        segment_duration = video_duration / 3
-                        
-                        for i in range(3):
-                            start_time = i * segment_duration
-                            if start_time < video_duration:
-                                start_word_idx = i * words_per_segment
-                                end_word_idx = min((i + 1) * words_per_segment, len(words))
-                                segment_words = words[start_word_idx:end_word_idx]
-                                
-                                if segment_words:
-                                    text = ' '.join(segment_words)
-                                    
-                                    try:
-                                        subtitle_clip = TextClip(
-                                            text,
-                                            fontsize=20,
-                                            color='white',
-                                            stroke_color='black',
-                                            stroke_width=1
-                                        ).set_position(('center', 'bottom')).set_start(start_time).set_duration(segment_duration * 0.8)
-                                        
-                                        subtitle_clips.append(subtitle_clip)
-                                        print(f"Created subtitle: '{text}' at {start_time}s")
-                                    except Exception as subtitle_error:
-                                        print(f"Error creating subtitle clip: {subtitle_error}")
-                                        continue
-                
-                elif isinstance(subtitle_data[0], str):
-                    words = subtitle_data[:10]
-                    text = ' '.join(words)
-                    
-                    try:
-                        subtitle_clip = TextClip(
-                            text,
-                            fontsize=20,
-                            color='white',
-                            stroke_color='black',
-                            stroke_width=1
-                        ).set_position(('center', 'bottom')).set_start(0).set_duration(video_duration * 0.8)
-                        
-                        subtitle_clips.append(subtitle_clip)
-                        print(f"Created single subtitle: '{text}'")
-                    except Exception as subtitle_error:
-                        print(f"Error creating subtitle: {subtitle_error}")
-            
-            print(f"Successfully created {len(subtitle_clips)} subtitle clips")
-        
-        if has_audio and audio_clip:
-            main_clip = image_clip.set_audio(audio_clip)
-        else:
-            main_clip = image_clip
-            
-        if subtitle_clips:
-            final_clip = CompositeVideoClip([main_clip] + subtitle_clips)
-        else:
-            final_clip = main_clip
-        
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as video_file:
-            video_path = video_file.name
-        
-        print("Exporting optimized video...")
-        final_clip.write_videofile(
-            video_path,
-            fps=15,
-            audio_codec='aac' if has_audio else None,
-            codec='libx264',
-            bitrate='500k',
-            verbose=False,
-            logger=None
-        )
-        
-        final_clip.close()
-        if has_audio and audio_clip:
-            audio_clip.close()
-        del final_clip, image_clip
-        if has_audio and audio_clip:
-            del audio_clip
-        gc.collect()
-        
-        os.unlink(img_path)
-        if has_audio and audio_path:
-            os.unlink(audio_path)
-        
-        print("Converting to base64...")
-        with open(video_path, 'rb') as video_file:
-            video_base64 = base64.b64encode(video_file.read()).decode('utf-8')
-        
-        os.unlink(video_path)
-        
-        print(f"Optimized video creation successful! Base64 length: {len(video_base64)}")
-        
-        return {
-            'video_url': f"data:video/mp4;base64,{video_base64}",
-            'video_data': video_base64,
-            'session_id': session_id,
-            'ai_generated': True,
-            'duration': video_duration,
-            'subtitle_count': len(subtitle_clips),
-            'status': 'Optimized video with subtitles created',
-            'size_bytes': len(video_base64) * 3 / 4,
-            'features': ['synced_subtitles', 'memory_optimized']
-        }
-        
-    except Exception as e:
-        print(f"Video Creation Error: {e}")
-        return {
-            'video_url': f'/videos/{session_id}_final.mp4',
-            'session_id': session_id,
-            'ai_generated': False,
-            'error': str(e),
-            'message': 'Video creation failed'
-        }
+        return generate_voice_with_retry_and_url(text, session_id)
 
 @app.route('/', methods=['GET', 'POST'])
 def handle_everything():
@@ -569,7 +299,7 @@ def handle_everything():
         return jsonify({
             'message': 'Horror Pipeline is Running!',
             'status': 'working',
-            'version': '2.6 - AI PIPELINE WITH ENHANCED SUBTITLES',
+            'version': '2.7 - SHOTSTACK INTEGRATION WITH IMPROVED VOICE',
             'time': time.time()
         })
     
@@ -581,7 +311,8 @@ def handle_everything():
             'elevenlabs_configured': bool(os.getenv('ELEVENLABS_API_KEY')),
             'moviepy_available': True,
             'subtitle_support': True,
-            'whisper_available': False,  # Will be True when requirements updated
+            'whisper_available': True,
+            'shotstack_ready': True,
             'time': time.time()
         })
     
@@ -608,7 +339,7 @@ def handle_everything():
         
         return jsonify({
             'success': True,
-            'story': story
+            **story
         })
     
     elif endpoint == 'create-image':
@@ -628,7 +359,7 @@ def handle_everything():
         session_id = data.get('session_id', 'unknown')
         text = data.get('text', '')
         
-        voice_result = generate_free_voice_with_timing(text, session_id)
+        voice_result = generate_voice_with_retry_and_url(text, session_id)
         
         return jsonify({
             'success': True,
@@ -642,61 +373,21 @@ def handle_everything():
         
         print(f"Enhanced voice request: {session_id}, text length: {len(text)}")
         
-        # Try enhanced version first, fallback to original if it fails
-        try:
-            voice_result = generate_enhanced_voice_with_whisper_timing(text, session_id)
-            print(f"Enhanced voice successful: {voice_result.get('timing_method', 'unknown')}")
-        except Exception as e:
-            print(f"Enhanced voice failed, using original method: {e}")
-            voice_result = generate_free_voice_with_timing(text, session_id)
-            # Add flag to indicate fallback was used
-            voice_result['enhanced_attempted'] = True
-            voice_result['enhanced_error'] = str(e)
+        voice_result = generate_enhanced_voice_with_whisper_timing(text, session_id)
         
         return jsonify({
             'success': True,
             **voice_result
         })
     
-    elif endpoint == 'create-video':
-        data = request.get_json() or {}
-        session_id = data.get('session_id', 'unknown')
-        image_url = data.get('image_url', '')
-        audio_data = data.get('audio_data', '')
-        subtitle_data = data.get('subtitle_data', [])
-        
-        print(f"Video creation request data:")
-        print(f"  session_id: {session_id}")
-        print(f"  image_url length: {len(image_url) if image_url else 0}")
-        print(f"  audio_data length: {len(audio_data) if audio_data else 0}")
-        print(f"  subtitle_data type: {type(subtitle_data)}")
-        print(f"  subtitle_data length: {len(subtitle_data) if subtitle_data else 0}")
-        
-        if isinstance(subtitle_data, str):
-            try:
-                import json
-                subtitle_data = json.loads(subtitle_data)
-                print(f"  Parsed subtitle_data: {subtitle_data}")
-            except:
-                print("  Creating fallback subtitles from story text")
-                subtitle_data = [
-                    {"word": "Horror", "start": 0, "end": 3},
-                    {"word": "awaits in", "start": 3, "end": 6},
-                    {"word": "the darkness", "start": 6, "end": 9},
-                    {"word": "below...", "start": 9, "end": 12}
-                ]
-        
-        video_result = create_real_video_with_subtitles(session_id, image_url, audio_data, subtitle_data)
-        
-        return jsonify({
-            'success': True,
-            **video_result
-        })
-    
     else:
         return jsonify({
             'error': 'Page not found',
-            'endpoint': endpoint
+            'endpoint': endpoint,
+            'available_endpoints': [
+                'home', 'test', 'create-session', 'create-story', 
+                'create-image', 'create-voice', 'create-voice-enhanced'
+            ]
         }), 404
 
 if __name__ == '__main__':
